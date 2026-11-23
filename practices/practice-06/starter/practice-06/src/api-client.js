@@ -1,47 +1,52 @@
-export class ApiError extends Error {
-  constructor(message, {
-    kind,
-    status = null,
-    code = null,
-    details = null,
-    url = null,
-    cause,
-  } = {}) {
-    super(message, cause === undefined ? undefined : { cause });
-    this.name = "ApiError";
-    this.kind = kind;
-    this.status = status;
-    this.code = code;
-    this.details = details;
-    this.url = url;
+const BASE_URL = "http://127.0.0.1:5505/api";
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(BASE_URL + url, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  
+  if (!response.ok) {
+    let errorData;
+    try { errorData = await response.json(); } catch { errorData = {}; }
+    const error = new Error(errorData.message || "Ошибка HTTP");
+    error.kind = "http";
+    error.status = response.status;
+    throw error;
   }
+  return response.json();
 }
 
-// Соединяет абсолютный baseUrl, путь и непустые query-параметры.
-export function buildUrl(baseUrl, path, query = {}) {
-  void baseUrl;
-  void path;
-  void query;
-  throw new Error("Не реализовано: buildUrl");
+export async function getTasks(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.completed !== undefined) params.set("completed", String(filters.completed));
+  if (filters.priority) params.set("priority", filters.priority);
+  return requestJson(`/tasks?${params.toString()}`);
 }
 
-// requestJson(path, { method, query, body, signal, timeoutMs } = {})
-// поддерживает GET, POST, PATCH и DELETE; ответ 204 преобразуется в null.
-export function createApiClient({
-  baseUrl,
-  fetchFn = globalThis.fetch,
-  timeoutMs = 3000,
-} = {}) {
-  void baseUrl;
-  void fetchFn;
-  void timeoutMs;
+export async function createTask(title, priority) {
+  return requestJson("/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title, priority }),
+  });
+}
 
-  // Перенесите решение ПР5 и расширьте его:
-  // 1. Разрешите только GET, POST, PATCH и DELETE.
-  // 2. Для body выполните JSON.stringify и добавьте Content-Type: application/json.
-  // 3. Не допускайте body у GET и не добавляйте Content-Type без тела.
-  // 4. Сохраните Accept, тайм-аут, внешний AbortSignal и виды ApiError из ПР5.
-  // 5. Проверяйте HTTP-ошибку до Content-Type успешного ответа.
-  // 6. Для статуса 204 возвращайте null, не пытаясь прочитать JSON.
-  throw new Error("Не реализовано: createApiClient");
+export async function updateTask(id, title, priority) {
+  return requestJson(`/tasks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ title, priority }),
+  });
+}
+
+export async function toggleTask(id, completed) {
+  return requestJson(`/tasks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ completed }),
+  });
+}
+
+export async function removeTask(id) {
+  return requestJson(`/tasks/${id}`, {
+    method: "DELETE",
+  });
 }

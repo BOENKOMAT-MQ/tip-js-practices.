@@ -1,47 +1,117 @@
-import { createApiClient } from "./api-client.js";
-import { createAppController } from "./app-controller.js";
-import { createDomView } from "./dom-app.js";
-import { createTaskApi } from "./task-api.js";
-import { getVariantFilters, variantNumber } from "./variant.js";
+import { getTasks, createTask, updateTask, toggleTask, removeTask } from "./api-client.js";
+import { renderTaskList, renderEmptyState } from "./task-view.js";
+import { validateTaskDraft } from "./form-validation.js";
 
-function readApiUrl(params) {
-  const value = params.get("api") ?? "http://127.0.0.1:5505/api";
-  const url = new URL(value);
-  if (!["http:", "https:"].includes(url.protocol)) throw new TypeError("Неверный протокол API.");
-  return url.href.replace(/\/$/, "");
+const elements = {
+  list: document.querySelector("#task-list"),
+  empty: document.querySelector("#empty-message"),
+  form: document.querySelector("#task-form"),
+  idInput: document.querySelector("#task-id"),
+  titleInput: document.querySelector("#task-title"),
+  priorityInput: document.querySelector("#task-priority"),
+  submitButton: document.querySelector("#form-submit"),
+  cancelButton: document.querySelector("#cancel-edit"),
+  resetButton: document.querySelector("#reset-data"),
+  message: document.querySelector("#operation-message"),
+};
+
+let currentTasks = [];
+let editingId = null;
+
+async function loadApp() {
+  try {
+    elements.message.textContent = "Загрузка...";
+    const res = await getTasks();
+    currentTasks = res.data;
+    renderApp();
+    elements.message.textContent = "";
+  } catch (error) {
+    elements.message.textContent = `Ошибка загрузки: ${error.message}`;
+  }
 }
 
-const view = createDomView();
-
-try {
-  const params = new URLSearchParams(window.location.search);
-  const baseUrl = readApiUrl(params);
-  const initialFilters = params.get("dataset") === "variant"
-    ? getVariantFilters(variantNumber)
-    : {};
-  view.setApiUrl(baseUrl);
-  view.setFilters(initialFilters);
-
-  const client = createApiClient({ baseUrl, timeoutMs: 3000 });
-  const api = createTaskApi(client);
-  const controller = createAppController({ api, view });
-
-  view.connect({
-    submit: (draft) => controller.submit(draft),
-    filters: (filters) => controller.applyFilters(filters),
-    refresh: () => controller.refresh(),
-    cancelEdit: () => controller.cancelEdit(),
-    resetData: () => controller.resetData(),
-    taskAction(action, id) {
-      if (action === "toggle") controller.toggleTask(id);
-      if (action === "edit") controller.beginEdit(id);
-      if (action === "delete") controller.deleteTask(id);
-    },
-  });
-
-  const ready = controller.start(initialFilters);
-  window.practice06 = { controller, ready };
-} catch (error) {
-  console.error(error);
-  view.setListState("error", "Приложение не запустилось. Проверьте Console и выполните задания в src.");
+function renderApp() {
+  renderTaskList(elements.list, currentTasks);
+  renderEmptyState(elements.empty, currentTasks.length);
 }
+
+function setFormMode(id = null) {
+  if (id === null) {
+    editingId = null;
+    elements.form.reset();
+    elements.idInput.disabled = false;
+    elements.submitButton.textContent = "Добавить задачу";
+    if (elements.cancelButton) elements.cancelButton.hidden = true;
+  } else {
+    const task = currentTasks.find((t) => t.id === id);
+    if (!task) return;
+    editingId = id;
+    elements.idInput.value = task.id;
+    elements.idInput.disabled = true;
+    elements.titleInput.value = task.title;
+    elements.priorityInput.value = task.priority;
+    elements.submitButton.textContent = "Сохранить изменения";
+    if (elements.cancelButton) elements.cancelButton.hidden = false;
+  }
+}
+
+async function handleFormSubmit(event) {
+  event.preventDefault();
+  const draft = {
+    title: elements.titleInput.value,
+    priority: elements.priorityInput.value,
+  };
+  
+  const check = validateTaskDraft(draft, currentTasks, editingId);
+  if (!check.ok) {
+    elements.message.textContent = Object.values(check.errors)[0];
+    return;
+  }
+
+  try {
+    elements.message.textContent = "Сохранение...";
+    if (editingId === null) {
+      await createTask(check.value.title, check.value.priority);
+    } else {
+      await updateTask(editingId, check.value.title, check.value.priority);
+    }
+    await loadApp();
+    setFormMode(null);
+    elements.message.textContent = "Успешно сохранено.";
+  } catch (error) {
+    elements.message.textContent = `Ошибка: ${error.message}`;
+  }
+}
+
+async function handleListClick(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const id = Number(button.closest("[data-task-id]").dataset.taskId);
+  const action = button.dataset.action;
+
+  if (action === "edit") {
+    setFormMode(id);
+    return;
+  }
+
+  try {
+    elements.message.textContent = "Обработка...";
+    if (action === "toggle") {
+      const task = currentTasks.find((t) => t.id === id);
+      await toggleTask(id, !task.completed);
+    } else if (action === "delete") {
+      await removeTask(id);
+    }
+    await loadApp();
+    if (editingId === id && action === "delete") setFormMode(null);
+    elements.message.textContent = "Готово.";
+  } catch (error) {
+    elements.message.textContent = `Ошибка: ${error.message}`;
+  }
+}
+
+elements.form.addEventListener("submit", handleFormSubmit);
+if (elements.cancelButton) elements.cancelButton.addEventListener("click", () => setFormMode(null));
+elements.list.addEventListener("click", handleListClick);
+
+loadApp();
