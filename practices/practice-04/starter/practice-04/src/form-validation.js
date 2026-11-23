@@ -1,17 +1,38 @@
 const ALLOWED_PRIORITIES = new Set(["low", "medium", "high"]);
 
-// Чистая проверка данных формы. DOM и показ сообщений выполняются в main.js.
-// draft: { id, title, priority }; editingId: null либо id редактируемой задачи.
 export function validateTaskDraft(draft, tasks, editingId = null) {
-  // TODO: нормализовать и проверить id, title и priority.
-  // В режиме создания id должен быть уникальным.
-  // В режиме редактирования используется editingId и проверяется наличие задачи.
-  // Успех: { ok: true, value: { id, title, priority } }.
-  // Отказ: { ok: false, errors: { id?: "...", title?: "...", priority?: "..." } }.
-  // ALLOWED_PRIORITIES можно использовать при проверке приоритета.
-  void ALLOWED_PRIORITIES;
-  void draft;
-  void tasks;
-  void editingId;
-  throw new Error("Не реализовано: validateTaskDraft");
+  const errors = {};
+  const source = draft ?? {};
+  let id;
+
+  if (editingId !== null) {
+    id = editingId;
+    if (!Number.isSafeInteger(id) || id <= 0 || !tasks.some((t) => t.id === id)) {
+      errors.id = "Задача для редактирования не найдена.";
+    }
+  } else {
+    const raw = source.id;
+    const num =
+      typeof raw === "number" ? raw
+      : typeof raw === "string" && raw.trim() !== "" ? Number(raw)
+      : NaN;
+    if (!Number.isSafeInteger(num) || num <= 0) {
+      errors.id = "Идентификатор — положительное целое число.";
+    } else if (tasks.some((t) => t.id === num)) {
+      errors.id = "Задача с таким идентификатором уже есть.";
+    } else {
+      id = num;
+    }
+  }
+
+  const rawTitle = source.title;
+  const title = typeof rawTitle === "string" ? rawTitle.trim() : "";
+  if (title.length === 0) errors.title = "Название не должно быть пустым.";
+  else if (title.length > 100) errors.title = "Название не длиннее 100 символов.";
+
+  const priority = source.priority;
+  if (!ALLOWED_PRIORITIES.has(priority)) errors.priority = "Недопустимый приоритет.";
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return { ok: true, value: { id, title, priority } };
 }

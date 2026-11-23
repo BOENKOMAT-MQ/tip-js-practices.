@@ -1,10 +1,6 @@
 import { demoTasks, variantTasks, variantNumber } from "./data.js";
 import {
-  addTask,
-  findTaskById,
-  removeTask,
-  setTaskCompleted,
-  updateTask,
+  addTask, findTaskById, removeTask, setTaskCompleted, updateTask,
 } from "./task-service.js";
 import { getVisibleTasks } from "./task-selectors.js";
 import { renderEmptyState, renderSummary, renderTaskList } from "./task-view.js";
@@ -40,8 +36,6 @@ const storageKey = isCheckRun
   ? `tip-js-practice-04:checks:${datasetName}`
   : `tip-js-practice-04:${datasetName}`;
 
-// Готовая граница запуска: даже незавершённый или ошибочный модуль хранилища
-// не должен оставлять страницу без диагностического сообщения.
 let loaded;
 try {
   loaded = loadTasks(window.localStorage, storageKey, initialTasks);
@@ -72,10 +66,15 @@ if (loaded.source === "storage") {
 }
 
 function renderApp() {
-  // TODO: перенести согласованную отрисовку ПР3.
-  // Отобрать задачи, обновить список, сводку, пустое состояние и кнопки фильтра.
-  // Не читать и не записывать localStorage внутри функции отрисовки.
-  throw new Error("Не реализовано: renderApp");
+  const visible = getVisibleTasks(currentTasks, currentFilter);
+  renderTaskList(elements.list, visible);
+  renderSummary(elements.summary, currentTasks, visible.length);
+  renderEmptyState(elements.empty, currentTasks.length, visible.length);
+  for (const btn of elements.filters.querySelectorAll("[data-filter]")) {
+    const active = btn.dataset.filter === currentFilter;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  }
 }
 
 function clearFieldError(name) {
@@ -108,11 +107,31 @@ function showFormErrors(errors) {
 }
 
 function setFormMode(id = null) {
-  // TODO: для null очистить форму и включить режим создания.
-  // Для существующего id заполнить поля, заблокировать изменение id
-  // и включить режим редактирования. Отсутствующий id обработать как отказ.
-  void id;
-  throw new Error("Не реализовано: setFormMode");
+  if (id === null) {
+    editingId = null;
+    elements.form.reset();
+    elements.idInput.disabled = false;
+    elements.formHeading.textContent = "Добавление задачи";
+    elements.submitButton.textContent = "Добавить задачу";
+    elements.cancelButton.hidden = true;
+    elements.formMode.textContent = "Режим создания новой задачи.";
+    clearFormErrors();
+    elements.idInput.focus();
+    return;
+  }
+  const task = findTaskById(currentTasks, id);
+  if (!task) { elements.message.textContent = "Задача не найдена."; return; }
+  editingId = id;
+  elements.idInput.value = String(task.id);
+  elements.idInput.disabled = true;
+  elements.titleInput.value = task.title;
+  elements.priorityInput.value = task.priority;
+  elements.formHeading.textContent = "Редактирование задачи";
+  elements.submitButton.textContent = "Сохранить изменения";
+  elements.cancelButton.hidden = false;
+  elements.formMode.textContent = `Редактирование задачи id = ${task.id}.`;
+  clearFormErrors();
+  elements.titleInput.focus();
 }
 
 function persistCurrentTasks(successMessage) {
@@ -126,8 +145,6 @@ function persistCurrentTasks(successMessage) {
   return saved;
 }
 
-// Готовая вспомогательная функция из логики ПР3. После полной перерисовки
-// возвращает фокус на действие той же задачи либо на активный фильтр.
 function restoreTaskFocus(id, action) {
   const actionButton = elements.list.querySelector(
     `[data-task-id="${id}"] button[data-action="${action}"]`,
@@ -138,34 +155,66 @@ function restoreTaskFocus(id, action) {
 
 function handleFormSubmit(event) {
   event.preventDefault();
-  // TODO: собрать draft из трёх полей и вызвать validateTaskDraft.
-  // При отказе показать ошибки, не менять данные и не обращаться к storage.
-  // В режиме создания вызвать addTask, в режиме редактирования — updateTask.
-  // При успехе сохранить новый массив, выйти из режима редактирования,
-  // записать localStorage и обновить интерфейс.
-  throw new Error("Не реализовано: handleFormSubmit");
+  const formData = new FormData(elements.form);
+  const draft = {
+    id: formData.get("id"),
+    title: formData.get("title"),
+    priority: formData.get("priority"),
+  };
+  
+  const check = validateTaskDraft(draft, currentTasks, editingId);
+  if (!check.ok) { showFormErrors(check.errors); return; }
+
+  const result = editingId === null
+    ? addTask(currentTasks, check.value.id, check.value.title, check.value.priority)
+    : updateTask(currentTasks, check.value.id, check.value.title, check.value.priority);
+
+  if (!result.ok) { showFormErrors({ id: result.error }); return; }
+
+  currentTasks = result.tasks;
+  const wasEditing = editingId !== null;
+  setFormMode();
+  persistCurrentTasks(wasEditing ? "Изменения сохранены." : "Задача добавлена.");
 }
 
 function handleTaskListClick(event) {
-  // TODO: перенести toggle/delete из ПР3 и добавить действие edit.
-  // edit только переводит форму в режим редактирования и не пишет storage.
-  // После успешных toggle/delete сохранить currentTasks через persistCurrentTasks,
-  // затем вызвать restoreTaskFocus(id, action).
-  void event;
-  throw new Error("Не реализовано: handleTaskListClick");
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const id = Number(button.closest("[data-task-id]")?.dataset.taskId);
+  const action = button.dataset.action;
+  if (action === "edit") { setFormMode(id); return; }
+
+  let result;
+  if (action === "toggle") {
+    const task = findTaskById(currentTasks, id);
+    if (!task) return;
+    result = setTaskCompleted(currentTasks, id, !task.completed);
+  } else if (action === "delete") {
+    result = removeTask(currentTasks, id);
+  } else return;
+
+  if (!result.ok) { elements.message.textContent = result.error; return; }
+  currentTasks = result.tasks;
+  if (editingId === id && action === "delete") setFormMode();
+  persistCurrentTasks(action === "toggle" ? "Статус изменён." : "Задача удалена.");
+  restoreTaskFocus(id, action);
 }
 
 function handleFilterClick(event) {
-  // TODO: перенести реализацию ПР3. Выбор фильтра не сохраняется в localStorage.
-  void event;
-  throw new Error("Не реализовано: handleFilterClick");
+  const button = event.target.closest("[data-filter]");
+  if (!button) return;
+  currentFilter = button.dataset.filter;
+  renderApp();
 }
 
 function handleResetClick() {
-  // TODO: удалить только storageKey, восстановить копию initialTasks,
-  // вернуть фильтр all, выйти из редактирования и обновить приложение.
-  // Ошибку removeSavedTasks показать пользователю, исключение не выпускать.
-  throw new Error("Не реализовано: handleResetClick");
+  const removed = removeSavedTasks(window.localStorage, storageKey);
+  if (!removed.ok) elements.message.textContent = removed.error;
+  currentTasks = initialTasks.map((t) => ({ ...t }));
+  currentFilter = "all";
+  setFormMode();
+  renderApp();
+  elements.storageStatus.textContent = "Исходный набор восстановлен.";
 }
 
 elements.form.addEventListener("submit", handleFormSubmit);
